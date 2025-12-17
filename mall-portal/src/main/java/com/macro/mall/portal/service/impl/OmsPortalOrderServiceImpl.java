@@ -104,22 +104,23 @@ public class OmsPortalOrderServiceImpl implements OmsPortalOrderService {
         List<CartPromotionItem> cartPromotionItemList = cartItemService.listPromotion(currentMember.getId(), orderParam.getCartIds());
         for (CartPromotionItem cartPromotionItem : cartPromotionItemList) {
             //生成下单商品信息
-            OmsOrderItem orderItem = new OmsOrderItem();
-            orderItem.setProductId(cartPromotionItem.getProductId());
-            orderItem.setProductName(cartPromotionItem.getProductName());
-            orderItem.setProductPic(cartPromotionItem.getProductPic());
-            orderItem.setProductAttr(cartPromotionItem.getProductAttr());
-            orderItem.setProductBrand(cartPromotionItem.getProductBrand());
-            orderItem.setProductSn(cartPromotionItem.getProductSn());
-            orderItem.setProductPrice(cartPromotionItem.getPrice());
-            orderItem.setProductQuantity(cartPromotionItem.getQuantity());
-            orderItem.setProductSkuId(cartPromotionItem.getProductSkuId());
-            orderItem.setProductSkuCode(cartPromotionItem.getProductSkuCode());
-            orderItem.setProductCategoryId(cartPromotionItem.getProductCategoryId());
-            orderItem.setPromotionAmount(cartPromotionItem.getReduceAmount());
-            orderItem.setPromotionName(cartPromotionItem.getPromotionMessage());
-            orderItem.setGiftIntegration(cartPromotionItem.getIntegration());
-            orderItem.setGiftGrowth(cartPromotionItem.getGrowth());
+            OmsOrderItem orderItem = OmsOrderItem.builder()
+                    .productId(cartPromotionItem.getProductId())
+                    .productName(cartPromotionItem.getProductName())
+                    .productPic(cartPromotionItem.getProductPic())
+                    .productAttr(cartPromotionItem.getProductAttr())
+                    .productBrand(cartPromotionItem.getProductBrand())
+                    .productSn(cartPromotionItem.getProductSn())
+                    .productPrice(cartPromotionItem.getPrice())
+                    .productQuantity(cartPromotionItem.getQuantity())
+                    .productSkuId(cartPromotionItem.getProductSkuId())
+                    .productSkuCode(cartPromotionItem.getProductSkuCode())
+                    .productCategoryId(cartPromotionItem.getProductCategoryId())
+                    .promotionAmount(cartPromotionItem.getReduceAmount())
+                    .promotionName(cartPromotionItem.getPromotionMessage())
+                    .giftIntegration(cartPromotionItem.getIntegration())
+                    .giftGrowth(cartPromotionItem.getGrowth())
+                    .build();
             orderItemList.add(orderItem);
         }
         //判断购物车中商品是否都有库存
@@ -166,56 +167,60 @@ public class OmsPortalOrderServiceImpl implements OmsPortalOrderService {
         //进行库存锁定
         lockStock(cartPromotionItemList);
         //根据商品合计、运费、活动优惠、优惠券、积分计算应付金额
-        OmsOrder order = new OmsOrder();
-        order.setDiscountAmount(new BigDecimal(0));
-        order.setTotalAmount(calcTotalAmount(orderItemList));
-        order.setFreightAmount(new BigDecimal(0));
-        order.setPromotionAmount(calcPromotionAmount(orderItemList));
-        order.setPromotionInfo(getOrderPromotionInfo(orderItemList));
+        OmsOrder.Builder orderBuilder = OmsOrder.builder()
+                .discountAmount(new BigDecimal(0))
+                .totalAmount(calcTotalAmount(orderItemList))
+                .freightAmount(new BigDecimal(0))
+                .promotionAmount(calcPromotionAmount(orderItemList))
+                .promotionInfo(getOrderPromotionInfo(orderItemList))
+                .memberId(currentMember.getId())
+                .createTime(new Date())
+                .memberUsername(currentMember.getUsername())
+                .payType(orderParam.getPayType())
+                .sourceType(1)
+                .status(0)
+                .orderType(0)
+                .confirmStatus(0)
+                .deleteStatus(0);
+
+        //设置优惠券信息
         if (orderParam.getCouponId() == null) {
-            order.setCouponAmount(new BigDecimal(0));
+            orderBuilder.couponAmount(new BigDecimal(0));
         } else {
-            order.setCouponId(orderParam.getCouponId());
-            order.setCouponAmount(calcCouponAmount(orderItemList));
+            orderBuilder.couponId(orderParam.getCouponId())
+                    .couponAmount(calcCouponAmount(orderItemList));
         }
+
+        //设置积分信息
         if (orderParam.getUseIntegration() == null) {
-            order.setIntegration(0);
-            order.setIntegrationAmount(new BigDecimal(0));
+            orderBuilder.integration(0)
+                    .integrationAmount(new BigDecimal(0));
         } else {
-            order.setIntegration(orderParam.getUseIntegration());
-            order.setIntegrationAmount(calcIntegrationAmount(orderItemList));
+            orderBuilder.useIntegration(orderParam.getUseIntegration())
+                    .integrationAmount(calcIntegrationAmount(orderItemList));
         }
-        order.setPayAmount(calcPayAmount(order));
-        //转化为订单信息并插入数据库
-        order.setMemberId(currentMember.getId());
-        order.setCreateTime(new Date());
-        order.setMemberUsername(currentMember.getUsername());
-        //支付方式：0->未支付；1->支付宝；2->微信
-        order.setPayType(orderParam.getPayType());
-        //订单来源：0->PC订单；1->app订单
-        order.setSourceType(1);
-        //订单状态：0->待付款；1->待发货；2->已发货；3->已完成；4->已关闭；5->无效订单
-        order.setStatus(0);
-        //订单类型：0->正常订单；1->秒杀订单
-        order.setOrderType(0);
-        //收货人信息：姓名、电话、邮编、地址
+
+        //收货人信息
         UmsMemberReceiveAddress address = memberReceiveAddressService.getItem(orderParam.getMemberReceiveAddressId());
-        order.setReceiverName(address.getName());
-        order.setReceiverPhone(address.getPhoneNumber());
-        order.setReceiverPostCode(address.getPostCode());
-        order.setReceiverProvince(address.getProvince());
-        order.setReceiverCity(address.getCity());
-        order.setReceiverRegion(address.getRegion());
-        order.setReceiverDetailAddress(address.getDetailAddress());
-        //0->未确认；1->已确认
-        order.setConfirmStatus(0);
-        order.setDeleteStatus(0);
-        //计算赠送积分
+        orderBuilder.receiverName(address.getName())
+                .receiverPhone(address.getPhoneNumber())
+                .receiverPostCode(address.getPostCode())
+                .receiverProvince(address.getProvince())
+                .receiverCity(address.getCity())
+                .receiverRegion(address.getRegion())
+                .receiverDetailAddress(address.getDetailAddress());
+
+        //计算并设置订单金额
+        OmsOrder order = orderBuilder.build();
+        order.setPayAmount(calcPayAmount(order));
+
+        //计算赠送积分和成长值
         order.setIntegration(calcGifIntegration(orderItemList));
-        //计算赠送成长值
         order.setGrowth(calcGiftGrowth(orderItemList));
+
         //生成订单号
         order.setOrderSn(generateOrderSn(order));
+
         //设置自动收货天数
         List<OmsOrderSetting> orderSettings = orderSettingMapper.selectByExample(new OmsOrderSettingExample());
         if(CollUtil.isNotEmpty(orderSettings)){
@@ -254,11 +259,12 @@ public class OmsPortalOrderServiceImpl implements OmsPortalOrderService {
     @Override
     public Integer paySuccess(Long orderId, Integer payType) {
         //修改订单支付状态
-        OmsOrder order = new OmsOrder();
-        order.setId(orderId);
-        order.setStatus(1);
-        order.setPaymentTime(new Date());
-        order.setPayType(payType);
+        OmsOrder order = OmsOrder.builder()
+                .id(orderId)
+                .status(1)
+                .paymentTime(new Date())
+                .payType(payType)
+                .build();
         OmsOrderExample orderExample = new OmsOrderExample();
         orderExample.createCriteria()
                 .andIdEqualTo(order.getId())
@@ -323,8 +329,11 @@ public class OmsPortalOrderServiceImpl implements OmsPortalOrderService {
         OmsOrder cancelOrder = cancelOrderList.get(0);
         if (cancelOrder != null) {
             //修改订单状态为取消
-            cancelOrder.setStatus(4);
-            orderMapper.updateByPrimaryKeySelective(cancelOrder);
+            OmsOrder updatedOrder = OmsOrder.builder()
+                    .id(cancelOrder.getId())
+                    .status(4)
+                    .build();
+            orderMapper.updateByPrimaryKeySelective(updatedOrder);
             OmsOrderItemExample orderItemExample = new OmsOrderItemExample();
             orderItemExample.createCriteria().andOrderIdEqualTo(orderId);
             List<OmsOrderItem> orderItemList = orderItemMapper.selectByExample(orderItemExample);
@@ -366,10 +375,14 @@ public class OmsPortalOrderServiceImpl implements OmsPortalOrderService {
         if(order.getStatus()!=2){
             Asserts.fail("该订单还未发货！");
         }
-        order.setStatus(3);
-        order.setConfirmStatus(1);
-        order.setReceiveTime(new Date());
-        orderMapper.updateByPrimaryKey(order);
+        //使用Builder模式创建更新对象
+        OmsOrder updatedOrder = OmsOrder.builder()
+                .id(order.getId())
+                .status(3)
+                .confirmStatus(1)
+                .receiveTime(new Date())
+                .build();
+        orderMapper.updateByPrimaryKeySelective(updatedOrder);
     }
 
     @Override

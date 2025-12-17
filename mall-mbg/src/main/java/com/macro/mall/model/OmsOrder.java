@@ -6,6 +6,10 @@ import java.math.BigDecimal;
 import java.util.Date;
 
 public class OmsOrder implements Serializable {
+
+    public static Builder builder() {
+        return new Builder();
+    }
     @ApiModelProperty(value = "订单id")
     private Long id;
 
@@ -543,5 +547,240 @@ public class OmsOrder implements Serializable {
         sb.append(", serialVersionUID=").append(serialVersionUID);
         sb.append("]");
         return sb.toString();
+    }
+
+    /**
+     * Builder模式实现
+     */
+    public static class Builder {
+        private OmsOrder order;
+
+        public Builder() {
+            order = new OmsOrder();
+        }
+
+        public Builder id(Long id) {
+            order.setId(id);
+            return this;
+        }
+
+        public Builder memberId(Long memberId) {
+            order.setMemberId(memberId);
+            return this;
+        }
+
+        public Builder couponId(Long couponId) {
+            order.setCouponId(couponId);
+            return this;
+        }
+
+        public Builder orderSn(String orderSn) {
+            order.setOrderSn(orderSn);
+            return this;
+        }
+
+        public Builder createTime(Date createTime) {
+            order.setCreateTime(createTime);
+            return this;
+        }
+
+        public Builder memberUsername(String memberUsername) {
+            order.setMemberUsername(memberUsername);
+            return this;
+        }
+
+        public Builder totalAmount(BigDecimal totalAmount) {
+            order.setTotalAmount(totalAmount);
+            return this;
+        }
+
+        public Builder payAmount(BigDecimal payAmount) {
+            order.setPayAmount(payAmount);
+            return this;
+        }
+
+        public Builder freightAmount(BigDecimal freightAmount) {
+            order.setFreightAmount(freightAmount);
+            return this;
+        }
+
+        public Builder promotionAmount(BigDecimal promotionAmount) {
+            order.setPromotionAmount(promotionAmount);
+            return this;
+        }
+
+        public Builder integrationAmount(BigDecimal integrationAmount) {
+            order.setIntegrationAmount(integrationAmount);
+            return this;
+        }
+
+        public Builder couponAmount(BigDecimal couponAmount) {
+            order.setCouponAmount(couponAmount);
+            return this;
+        }
+
+        public Builder discountAmount(BigDecimal discountAmount) {
+            order.setDiscountAmount(discountAmount);
+            return this;
+        }
+
+        public Builder payType(Integer payType) {
+            order.setPayType(payType);
+            return this;
+        }
+
+        public Builder sourceType(Integer sourceType) {
+            order.setSourceType(sourceType);
+            return this;
+        }
+
+        public Builder status(Integer status) {
+            order.setStatus(status);
+            return this;
+        }
+
+        public Builder orderType(Integer orderType) {
+            order.setOrderType(orderType);
+            return this;
+        }
+
+        public Builder deliveryCompany(String deliveryCompany) {
+            order.setDeliveryCompany(deliveryCompany);
+            return this;
+        }
+
+        public Builder deliverySn(String deliverySn) {
+            order.setDeliverySn(deliverySn);
+            return this;
+        }
+
+        public Builder autoConfirmDay(Integer autoConfirmDay) {
+            order.setAutoConfirmDay(autoConfirmDay);
+            return this;
+        }
+
+        public Builder integration(Integer integration) {
+            order.setIntegration(integration);
+            return this;
+        }
+
+        public Builder growth(Integer growth) {
+            order.setGrowth(growth);
+            return this;
+        }
+
+        public Builder promotionInfo(String promotionInfo) {
+            order.setPromotionInfo(promotionInfo);
+            return this;
+        }
+
+        public Builder billType(Integer billType) {
+            order.setBillType(billType);
+            return this;
+        }
+
+        public Builder billHeader(String billHeader) {
+            order.setBillHeader(billHeader);
+            return this;
+        }
+
+        public Builder billContent(String billContent) {
+            order.setBillContent(billContent);
+            return this;
+        }
+
+        public Builder billReceiverPhone(String billReceiverPhone) {
+            order.setBillReceiverPhone(billReceiverPhone);
+            return this;
+        }
+
+        public Builder billReceiverEmail(String billReceiverEmail) {
+            order.setBillReceiverEmail(billReceiverEmail);
+            return this;
+        }
+
+        public Builder receiverName(String receiverName) {
+            order.setReceiverName(receiverName);
+            return this;
+        }
+
+        public Builder receiverPhone(String receiverPhone) {
+            order.setReceiverPhone(receiverPhone);
+            return this;
+        }
+
+        public Builder receiverPostCode(String receiverPostCode) {
+            order.setReceiverPostCode(receiverPostCode);
+            return this;
+        }
+
+        public Builder receiverProvince(String receiverProvince) {
+            order.setReceiverProvince(receiverProvince);
+            return this;
+        }
+
+        public Builder receiverCity(String receiverCity) {
+            order.setReceiverCity(receiverCity);
+            return this;
+        }
+
+        public Builder receiverRegion(String receiverRegion) {
+            order.setReceiverRegion(receiverRegion);
+            return this;
+        }
+
+        public Builder receiverDetailAddress(String receiverDetailAddress) {
+            order.setReceiverDetailAddress(receiverDetailAddress);
+            return this;
+        }
+
+        public Builder note(String note) {
+            order.setNote(note);
+            return this;
+        }
+
+        public Builder confirmStatus(Integer confirmStatus) {
+            order.setConfirmStatus(confirmStatus);
+            return this;
+        }
+
+        public Builder deleteStatus(Integer deleteStatus) {
+            order.setDeleteStatus(deleteStatus);
+            return this;
+        }
+
+        public Builder useIntegration(Integer useIntegration) {
+            order.setUseIntegration(useIntegration);
+            return this;
+        }
+
+        public Builder paymentTime(Date paymentTime) {
+            order.setPaymentTime(paymentTime);
+            return this;
+        }
+
+        public Builder deliveryTime(Date deliveryTime) {
+            order.setDeliveryTime(deliveryTime);
+            return this;
+        }
+
+        public Builder receiveTime(Date receiveTime) {
+            order.setReceiveTime(receiveTime);
+            return this;
+        }
+
+        public Builder commentTime(Date commentTime) {
+            order.setCommentTime(commentTime);
+            return this;
+        }
+
+        public Builder modifyTime(Date modifyTime) {
+            order.setModifyTime(modifyTime);
+            return this;
+        }
+
+        public OmsOrder build() {
+            return order;
+        }
     }
 }

@@ -5,6 +5,10 @@ import java.io.Serializable;
 import java.math.BigDecimal;
 
 public class OmsOrderItem implements Serializable {
+
+    public static Builder builder() {
+        return new Builder();
+    }
     private Long id;
 
     @ApiModelProperty(value = "订单id")
@@ -260,5 +264,125 @@ public class OmsOrderItem implements Serializable {
         sb.append(", serialVersionUID=").append(serialVersionUID);
         sb.append("]");
         return sb.toString();
+    }
+
+    /**
+     * Builder模式实现
+     */
+    public static class Builder {
+        private OmsOrderItem orderItem;
+
+        public Builder() {
+            orderItem = new OmsOrderItem();
+        }
+
+        public Builder id(Long id) {
+            orderItem.setId(id);
+            return this;
+        }
+
+        public Builder orderId(Long orderId) {
+            orderItem.setOrderId(orderId);
+            return this;
+        }
+
+        public Builder orderSn(String orderSn) {
+            orderItem.setOrderSn(orderSn);
+            return this;
+        }
+
+        public Builder productId(Long productId) {
+            orderItem.setProductId(productId);
+            return this;
+        }
+
+        public Builder productPic(String productPic) {
+            orderItem.setProductPic(productPic);
+            return this;
+        }
+
+        public Builder productName(String productName) {
+            orderItem.setProductName(productName);
+            return this;
+        }
+
+        public Builder productBrand(String productBrand) {
+            orderItem.setProductBrand(productBrand);
+            return this;
+        }
+
+        public Builder productSn(String productSn) {
+            orderItem.setProductSn(productSn);
+            return this;
+        }
+
+        public Builder productPrice(BigDecimal productPrice) {
+            orderItem.setProductPrice(productPrice);
+            return this;
+        }
+
+        public Builder productQuantity(Integer productQuantity) {
+            orderItem.setProductQuantity(productQuantity);
+            return this;
+        }
+
+        public Builder productSkuId(Long productSkuId) {
+            orderItem.setProductSkuId(productSkuId);
+            return this;
+        }
+
+        public Builder productSkuCode(String productSkuCode) {
+            orderItem.setProductSkuCode(productSkuCode);
+            return this;
+        }
+
+        public Builder productCategoryId(Long productCategoryId) {
+            orderItem.setProductCategoryId(productCategoryId);
+            return this;
+        }
+
+        public Builder promotionName(String promotionName) {
+            orderItem.setPromotionName(promotionName);
+            return this;
+        }
+
+        public Builder promotionAmount(BigDecimal promotionAmount) {
+            orderItem.setPromotionAmount(promotionAmount);
+            return this;
+        }
+
+        public Builder couponAmount(BigDecimal couponAmount) {
+            orderItem.setCouponAmount(couponAmount);
+            return this;
+        }
+
+        public Builder integrationAmount(BigDecimal integrationAmount) {
+            orderItem.setIntegrationAmount(integrationAmount);
+            return this;
+        }
+
+        public Builder realAmount(BigDecimal realAmount) {
+            orderItem.setRealAmount(realAmount);
+            return this;
+        }
+
+        public Builder giftIntegration(Integer giftIntegration) {
+            orderItem.setGiftIntegration(giftIntegration);
+            return this;
+        }
+
+        public Builder giftGrowth(Integer giftGrowth) {
+            orderItem.setGiftGrowth(giftGrowth);
+            return this;
+        }
+
+        public Builder productAttr(String productAttr) {
+            orderItem.setProductAttr(productAttr);
+            return this;
+        }
+
+        public OmsOrderItem build() {
+            return orderItem;
+        }
     }
 }
