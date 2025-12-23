@@ -76,4 +76,25 @@ public class RabbitMqConfig {
                 .with(QueueEnum.QUEUE_TTL_ORDER_CANCEL.getRouteKey());
     }
 
+    /**
+     * 订单创建队列
+     */
+    @Bean
+    public Queue orderCreateQueue() {
+        return QueueBuilder
+                .durable(QueueEnum.QUEUE_ORDER_CREATE.getName())
+                .build();
+    }
+
+    /**
+     * 将订单创建队列绑定到交换机
+     */
+    @Bean
+    Binding orderCreateBinding(DirectExchange orderDirect, Queue orderCreateQueue){
+        return BindingBuilder
+                .bind(orderCreateQueue)
+                .to(orderDirect)
+                .with(QueueEnum.QUEUE_ORDER_CREATE.getRouteKey());
+    }
+
 }

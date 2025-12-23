@@ -14,4 +14,11 @@ public interface EsProductDao {
      * 获取指定ID的搜索商品
      */
     List<EsProduct> getAllEsProductList(@Param("id") Long id);
+
+    /**
+     * 根据关键字、品牌ID、分类ID搜索商品（降级方案）
+     */
+    List<EsProduct> searchProducts(@Param("keyword") String keyword, 
+                                   @Param("brandId") Long brandId, 
+                                   @Param("productCategoryId") Long productCategoryId);
 }

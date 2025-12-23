@@ -1,6 +1,11 @@
 package com.macro.mall.common.service.impl;
 
+import com.macro.mall.common.config.CircuitBreakerConfig;
 import com.macro.mall.common.service.RedisService;
+import com.macro.mall.common.util.CircuitBreakerUtil;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.RedisTemplate;
 
@@ -10,36 +15,105 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
- * Redis操作Service实现类
+ * Redis操作Service实现类（带断路器保护）
  * Created by macro on 2020/3/3.
  */
 public class RedisServiceImpl implements RedisService {
+    private static final Logger LOGGER = LoggerFactory.getLogger(RedisServiceImpl.class);
+    
     @Autowired
     private RedisTemplate<String, Object> redisTemplate;
+    
+    @Autowired(required = false)
+    private CircuitBreakerConfig circuitBreakerConfig;
+    
+    /**
+     * 获取Redis断路器
+     */
+    private CircuitBreaker getCircuitBreaker() {
+        if (circuitBreakerConfig != null) {
+            return circuitBreakerConfig.redisCircuitBreaker();
+        }
+        return null;
+    }
 
     @Override
     public void set(String key, Object value, long time) {
-        redisTemplate.opsForValue().set(key, value, time, TimeUnit.SECONDS);
+        CircuitBreaker circuitBreaker = getCircuitBreaker();
+        if (circuitBreaker != null) {
+            CircuitBreakerUtil.execute(
+                circuitBreaker,
+                () -> redisTemplate.opsForValue().set(key, value, time, TimeUnit.SECONDS),
+                () -> LOGGER.warn("Redis不可用，跳过缓存设置: {}", key)
+            );
+        } else {
+            redisTemplate.opsForValue().set(key, value, time, TimeUnit.SECONDS);
+        }
     }
 
     @Override
     public void set(String key, Object value) {
-        redisTemplate.opsForValue().set(key, value);
+        CircuitBreaker circuitBreaker = getCircuitBreaker();
+        if (circuitBreaker != null) {
+            CircuitBreakerUtil.execute(
+                circuitBreaker,
+                () -> redisTemplate.opsForValue().set(key, value),
+                () -> LOGGER.warn("Redis不可用，跳过缓存设置: {}", key)
+            );
+        } else {
+            redisTemplate.opsForValue().set(key, value);
+        }
     }
 
     @Override
     public Object get(String key) {
-        return redisTemplate.opsForValue().get(key);
+        CircuitBreaker circuitBreaker = getCircuitBreaker();
+        if (circuitBreaker != null) {
+            return CircuitBreakerUtil.execute(
+                circuitBreaker,
+                () -> redisTemplate.opsForValue().get(key),
+                () -> {
+                    LOGGER.warn("Redis不可用，返回null: {}", key);
+                    return null;
+                }
+            );
+        } else {
+            return redisTemplate.opsForValue().get(key);
+        }
     }
 
     @Override
     public Boolean del(String key) {
-        return redisTemplate.delete(key);
+        CircuitBreaker circuitBreaker = getCircuitBreaker();
+        if (circuitBreaker != null) {
+            return CircuitBreakerUtil.execute(
+                circuitBreaker,
+                () -> redisTemplate.delete(key),
+                () -> {
+                    LOGGER.warn("Redis不可用，跳过删除操作: {}", key);
+                    return false;
+                }
+            );
+        } else {
+            return redisTemplate.delete(key);
+        }
     }
 
     @Override
     public Long del(List<String> keys) {
-        return redisTemplate.delete(keys);
+        CircuitBreaker circuitBreaker = getCircuitBreaker();
+        if (circuitBreaker != null) {
+            return CircuitBreakerUtil.execute(
+                circuitBreaker,
+                () -> redisTemplate.delete(keys),
+                () -> {
+                    LOGGER.warn("Redis不可用，跳过批量删除操作");
+                    return 0L;
+                }
+            );
+        } else {
+            return redisTemplate.delete(keys);
+        }
     }
 
     @Override

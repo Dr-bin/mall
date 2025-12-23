@@ -37,12 +37,21 @@ public class OmsPortalOrderController {
         return CommonResult.success(confirmOrderResult);
     }
 
-    @ApiOperation("根据购物车信息生成订单")
+    @ApiOperation("根据购物车信息生成订单（异步处理）")
     @RequestMapping(value = "/generateOrder", method = RequestMethod.POST)
     @ResponseBody
     public CommonResult generateOrder(@RequestBody OrderParam orderParam) {
         Map<String, Object> result = portalOrderService.generateOrder(orderParam);
-        return CommonResult.success(result, "下单成功");
+        return CommonResult.success(result, "订单创建请求已提交，正在处理中");
+    }
+
+    @ApiOperation("查询订单创建处理状态")
+    @ApiImplicitParam(name = "requestId", value = "订单创建请求ID", required = true, paramType = "path", dataType = "string")
+    @RequestMapping(value = "/orderStatus/{requestId}", method = RequestMethod.GET)
+    @ResponseBody
+    public CommonResult<Map<String, Object>> getOrderCreateStatus(@PathVariable String requestId) {
+        Map<String, Object> status = portalOrderService.getOrderCreateStatus(requestId);
+        return CommonResult.success(status);
     }
 
     @ApiOperation("用户支付成功的回调")

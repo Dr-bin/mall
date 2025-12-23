@@ -3,6 +3,7 @@ package com.macro.mall.portal.service;
 import com.macro.mall.common.api.CommonPage;
 import com.macro.mall.portal.domain.ConfirmOrderResult;
 import com.macro.mall.portal.domain.OmsOrderDetail;
+import com.macro.mall.portal.domain.OrderCreateMessage;
 import com.macro.mall.portal.domain.OrderParam;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -73,4 +74,19 @@ public interface OmsPortalOrderService {
      */
     @Transactional
     void paySuccessByOrderSn(String orderSn, Integer payType);
+
+    /**
+     * 处理订单创建消息（消费者调用）
+     * 执行实际的订单创建业务逻辑
+     */
+    @Transactional
+    void processOrderCreate(OrderCreateMessage message);
+
+    /**
+     * 获取订单创建处理状态
+     * 
+     * @param requestId 订单创建请求ID
+     * @return 订单处理状态信息
+     */
+    Map<String, Object> getOrderCreateStatus(String requestId);
 }

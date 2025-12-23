@@ -3,11 +3,15 @@ package com.macro.mall.portal.service.impl;
 import com.macro.mall.common.service.RedisService;
 import com.macro.mall.mapper.UmsMemberMapper;
 import com.macro.mall.model.UmsMember;
+import com.macro.mall.model.UmsMemberExample;
 import com.macro.mall.portal.service.UmsMemberCacheService;
 import com.macro.mall.security.annotation.CacheException;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.springframework.util.CollectionUtils;
+
+import java.util.List;
 
 /**
  * UmsMemberCacheService实现类
@@ -42,7 +46,23 @@ public class UmsMemberCacheServiceImpl implements UmsMemberCacheService {
     @Override
     public UmsMember getMember(String username) {
         String key = REDIS_DATABASE + ":" + REDIS_KEY_MEMBER + ":" + username;
-        return (UmsMember) redisService.get(key);
+        UmsMember member = (UmsMember) redisService.get(key);
+        // 降级策略：如果Redis不可用或缓存未命中，从数据库查询
+        if (member == null) {
+            UmsMemberExample example = new UmsMemberExample();
+            example.createCriteria().andUsernameEqualTo(username);
+            List<UmsMember> memberList = memberMapper.selectByExample(example);
+            if (!CollectionUtils.isEmpty(memberList)) {
+                member = memberList.get(0);
+                // 尝试重新设置缓存（如果Redis可用）
+                try {
+                    setMember(member);
+                } catch (Exception e) {
+                    // 忽略缓存设置失败
+                }
+            }
+        }
+        return member;
     }
 
     @Override

@@ -2,11 +2,14 @@ package com.macro.mall.search.service.impl;
 
 import cn.hutool.core.collection.ListUtil;
 import cn.hutool.core.util.StrUtil;
+import com.macro.mall.common.config.CircuitBreakerConfig;
+import com.macro.mall.common.util.CircuitBreakerUtil;
 import com.macro.mall.search.dao.EsProductDao;
 import com.macro.mall.search.domain.EsProduct;
 import com.macro.mall.search.domain.EsProductRelatedInfo;
 import com.macro.mall.search.repository.EsProductRepository;
 import com.macro.mall.search.service.EsProductService;
+import io.github.resilience4j.circuitbreaker.CircuitBreaker;
 import org.elasticsearch.common.lucene.search.function.FunctionScoreQuery;
 import org.elasticsearch.index.query.BoolQueryBuilder;
 import org.elasticsearch.index.query.QueryBuilders;
@@ -58,6 +61,8 @@ public class EsProductServiceImpl implements EsProductService {
     private EsProductRepository productRepository;
     @Autowired
     private ElasticsearchRestTemplate elasticsearchRestTemplate;
+    @Autowired
+    private CircuitBreakerConfig circuitBreakerConfig;
     @Override
     public int importAll() {
         List<EsProduct> esProductList = productDao.getAllEsProductList(null);
@@ -103,144 +108,223 @@ public class EsProductServiceImpl implements EsProductService {
     @Override
     public Page<EsProduct> search(String keyword, Integer pageNum, Integer pageSize) {
         Pageable pageable = PageRequest.of(pageNum, pageSize);
-        return productRepository.findByNameOrSubTitleOrKeywords(keyword, keyword, keyword, pageable);
+        CircuitBreaker circuitBreaker = circuitBreakerConfig.elasticsearchCircuitBreaker();
+        
+        return CircuitBreakerUtil.execute(
+            circuitBreaker,
+            () -> productRepository.findByNameOrSubTitleOrKeywords(keyword, keyword, keyword, pageable),
+            () -> {
+                // 降级策略：从数据库查询
+                LOGGER.warn("Elasticsearch 不可用，降级到数据库查询");
+                List<EsProduct> productList = productDao.searchProducts(keyword, null, null);
+                if (CollectionUtils.isEmpty(productList)) {
+                    return new PageImpl<>(ListUtil.empty(), pageable, 0);
+                }
+                int start = (int) pageable.getOffset();
+                int end = Math.min((start + pageable.getPageSize()), productList.size());
+                List<EsProduct> pagedList = start < productList.size() ? productList.subList(start, end) : ListUtil.empty();
+                return new PageImpl<>(pagedList, pageable, productList.size());
+            }
+        );
     }
 
     @Override
     public Page<EsProduct> search(String keyword, Long brandId, Long productCategoryId, Integer pageNum, Integer pageSize,Integer sort) {
         Pageable pageable = PageRequest.of(pageNum, pageSize);
-        NativeSearchQueryBuilder nativeSearchQueryBuilder = new NativeSearchQueryBuilder();
-        //分页
-        nativeSearchQueryBuilder.withPageable(pageable);
-        //过滤
-        if (brandId != null || productCategoryId != null) {
-            BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
-            if (brandId != null) {
-                boolQueryBuilder.must(QueryBuilders.termQuery("brandId", brandId));
+        CircuitBreaker circuitBreaker = circuitBreakerConfig.elasticsearchCircuitBreaker();
+        
+        // 使用断路器保护 Elasticsearch 查询
+        return CircuitBreakerUtil.execute(
+            circuitBreaker,
+            () -> {
+                // 主要逻辑：从 Elasticsearch 查询
+                NativeSearchQueryBuilder nativeSearchQueryBuilder = new NativeSearchQueryBuilder();
+                //分页
+                nativeSearchQueryBuilder.withPageable(pageable);
+                //过滤
+                if (brandId != null || productCategoryId != null) {
+                    BoolQueryBuilder boolQueryBuilder = QueryBuilders.boolQuery();
+                    if (brandId != null) {
+                        boolQueryBuilder.must(QueryBuilders.termQuery("brandId", brandId));
+                    }
+                    if (productCategoryId != null) {
+                        boolQueryBuilder.must(QueryBuilders.termQuery("productCategoryId", productCategoryId));
+                    }
+                    nativeSearchQueryBuilder.withFilter(boolQueryBuilder);
+                }
+                //搜索
+                if (StrUtil.isEmpty(keyword)) {
+                    nativeSearchQueryBuilder.withQuery(QueryBuilders.matchAllQuery());
+                } else {
+                    List<FunctionScoreQueryBuilder.FilterFunctionBuilder> filterFunctionBuilders = new ArrayList<>();
+                    filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("name", keyword),
+                            ScoreFunctionBuilders.weightFactorFunction(10)));
+                    filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("subTitle", keyword),
+                            ScoreFunctionBuilders.weightFactorFunction(5)));
+                    filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("keywords", keyword),
+                            ScoreFunctionBuilders.weightFactorFunction(2)));
+                    FunctionScoreQueryBuilder.FilterFunctionBuilder[] builders = new FunctionScoreQueryBuilder.FilterFunctionBuilder[filterFunctionBuilders.size()];
+                    filterFunctionBuilders.toArray(builders);
+                    FunctionScoreQueryBuilder functionScoreQueryBuilder = QueryBuilders.functionScoreQuery(builders)
+                            .scoreMode(FunctionScoreQuery.ScoreMode.SUM)
+                            .setMinScore(2);
+                    nativeSearchQueryBuilder.withQuery(functionScoreQueryBuilder);
+                }
+                //排序
+                if(sort==1){
+                    //按新品从新到旧
+                    nativeSearchQueryBuilder.withSorts(SortBuilders.fieldSort("id").order(SortOrder.DESC));
+                }else if(sort==2){
+                    //按销量从高到低
+                    nativeSearchQueryBuilder.withSorts(SortBuilders.fieldSort("sale").order(SortOrder.DESC));
+                }else if(sort==3){
+                    //按价格从低到高
+                    nativeSearchQueryBuilder.withSorts(SortBuilders.fieldSort("price").order(SortOrder.ASC));
+                }else if(sort==4){
+                    //按价格从高到低
+                    nativeSearchQueryBuilder.withSorts(SortBuilders.fieldSort("price").order(SortOrder.DESC));
+                }else{
+                    //按相关度
+                    nativeSearchQueryBuilder.withSorts(SortBuilders.scoreSort().order(SortOrder.DESC));
+                }
+                nativeSearchQueryBuilder.withSorts(SortBuilders.scoreSort().order(SortOrder.DESC));
+                NativeSearchQuery searchQuery = nativeSearchQueryBuilder.build();
+                LOGGER.info("DSL:{}", searchQuery.getQuery().toString());
+                SearchHits<EsProduct> searchHits = elasticsearchRestTemplate.search(searchQuery, EsProduct.class);
+                if(searchHits.getTotalHits()<=0){
+                    return new PageImpl<>(ListUtil.empty(),pageable,0);
+                }
+                List<EsProduct> searchProductList = searchHits.stream().map(SearchHit::getContent).collect(Collectors.toList());
+                return new PageImpl<>(searchProductList,pageable,searchHits.getTotalHits());
+            },
+            () -> {
+                // 降级策略：从数据库查询
+                LOGGER.warn("Elasticsearch 不可用，降级到数据库查询");
+                List<EsProduct> productList = productDao.searchProducts(keyword, brandId, productCategoryId);
+                if (CollectionUtils.isEmpty(productList)) {
+                    return new PageImpl<>(ListUtil.empty(), pageable, 0);
+                }
+                // 手动分页
+                int start = (int) pageable.getOffset();
+                int end = Math.min((start + pageable.getPageSize()), productList.size());
+                List<EsProduct> pagedList = start < productList.size() ? productList.subList(start, end) : ListUtil.empty();
+                return new PageImpl<>(pagedList, pageable, productList.size());
             }
-            if (productCategoryId != null) {
-                boolQueryBuilder.must(QueryBuilders.termQuery("productCategoryId", productCategoryId));
-            }
-            nativeSearchQueryBuilder.withFilter(boolQueryBuilder);
-        }
-        //搜索
-        if (StrUtil.isEmpty(keyword)) {
-            nativeSearchQueryBuilder.withQuery(QueryBuilders.matchAllQuery());
-        } else {
-            List<FunctionScoreQueryBuilder.FilterFunctionBuilder> filterFunctionBuilders = new ArrayList<>();
-            filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("name", keyword),
-                    ScoreFunctionBuilders.weightFactorFunction(10)));
-            filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("subTitle", keyword),
-                    ScoreFunctionBuilders.weightFactorFunction(5)));
-            filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("keywords", keyword),
-                    ScoreFunctionBuilders.weightFactorFunction(2)));
-            FunctionScoreQueryBuilder.FilterFunctionBuilder[] builders = new FunctionScoreQueryBuilder.FilterFunctionBuilder[filterFunctionBuilders.size()];
-            filterFunctionBuilders.toArray(builders);
-            FunctionScoreQueryBuilder functionScoreQueryBuilder = QueryBuilders.functionScoreQuery(builders)
-                    .scoreMode(FunctionScoreQuery.ScoreMode.SUM)
-                    .setMinScore(2);
-            nativeSearchQueryBuilder.withQuery(functionScoreQueryBuilder);
-        }
-        //排序
-        if(sort==1){
-            //按新品从新到旧
-            nativeSearchQueryBuilder.withSorts(SortBuilders.fieldSort("id").order(SortOrder.DESC));
-        }else if(sort==2){
-            //按销量从高到低
-            nativeSearchQueryBuilder.withSorts(SortBuilders.fieldSort("sale").order(SortOrder.DESC));
-        }else if(sort==3){
-            //按价格从低到高
-            nativeSearchQueryBuilder.withSorts(SortBuilders.fieldSort("price").order(SortOrder.ASC));
-        }else if(sort==4){
-            //按价格从高到低
-            nativeSearchQueryBuilder.withSorts(SortBuilders.fieldSort("price").order(SortOrder.DESC));
-        }else{
-            //按相关度
-            nativeSearchQueryBuilder.withSorts(SortBuilders.scoreSort().order(SortOrder.DESC));
-        }
-        nativeSearchQueryBuilder.withSorts(SortBuilders.scoreSort().order(SortOrder.DESC));
-        NativeSearchQuery searchQuery = nativeSearchQueryBuilder.build();
-        LOGGER.info("DSL:{}", searchQuery.getQuery().toString());
-        SearchHits<EsProduct> searchHits = elasticsearchRestTemplate.search(searchQuery, EsProduct.class);
-        if(searchHits.getTotalHits()<=0){
-            return new PageImpl<>(ListUtil.empty(),pageable,0);
-        }
-        List<EsProduct> searchProductList = searchHits.stream().map(SearchHit::getContent).collect(Collectors.toList());
-        return new PageImpl<>(searchProductList,pageable,searchHits.getTotalHits());
+        );
     }
 
     @Override
     public Page<EsProduct> recommend(Long id, Integer pageNum, Integer pageSize) {
         Pageable pageable = PageRequest.of(pageNum, pageSize);
+        CircuitBreaker circuitBreaker = circuitBreakerConfig.elasticsearchCircuitBreaker();
+        
         List<EsProduct> esProductList = productDao.getAllEsProductList(id);
         if (esProductList.size() > 0) {
             EsProduct esProduct = esProductList.get(0);
             String keyword = esProduct.getName();
             Long brandId = esProduct.getBrandId();
             Long productCategoryId = esProduct.getProductCategoryId();
-            //根据商品标题、品牌、分类进行搜索
-            List<FunctionScoreQueryBuilder.FilterFunctionBuilder> filterFunctionBuilders = new ArrayList<>();
-            filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("name", keyword),
-                    ScoreFunctionBuilders.weightFactorFunction(8)));
-            filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("subTitle", keyword),
-                    ScoreFunctionBuilders.weightFactorFunction(2)));
-            filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("keywords", keyword),
-                    ScoreFunctionBuilders.weightFactorFunction(2)));
-            filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("brandId", brandId),
-                    ScoreFunctionBuilders.weightFactorFunction(5)));
-            filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("productCategoryId", productCategoryId),
-                    ScoreFunctionBuilders.weightFactorFunction(3)));
-            FunctionScoreQueryBuilder.FilterFunctionBuilder[] builders = new FunctionScoreQueryBuilder.FilterFunctionBuilder[filterFunctionBuilders.size()];
-            filterFunctionBuilders.toArray(builders);
-            FunctionScoreQueryBuilder functionScoreQueryBuilder = QueryBuilders.functionScoreQuery(builders)
-                    .scoreMode(FunctionScoreQuery.ScoreMode.SUM)
-                    .setMinScore(2);
-            //用于过滤掉相同的商品
-            BoolQueryBuilder boolQueryBuilder = new BoolQueryBuilder();
-            boolQueryBuilder.mustNot(QueryBuilders.termQuery("id",id));
-            //构建查询条件
-            NativeSearchQueryBuilder builder = new NativeSearchQueryBuilder();
-            builder.withQuery(functionScoreQueryBuilder);
-            builder.withFilter(boolQueryBuilder);
-            builder.withPageable(pageable);
-            NativeSearchQuery searchQuery = builder.build();
-            LOGGER.info("DSL:{}", searchQuery.getQuery().toString());
-            SearchHits<EsProduct> searchHits = elasticsearchRestTemplate.search(searchQuery, EsProduct.class);
-            if(searchHits.getTotalHits()<=0){
-                return new PageImpl<>(ListUtil.empty(),pageable,0);
-            }
-            List<EsProduct> searchProductList = searchHits.stream().map(SearchHit::getContent).collect(Collectors.toList());
-            return new PageImpl<>(searchProductList,pageable,searchHits.getTotalHits());
+            
+            return CircuitBreakerUtil.execute(
+                circuitBreaker,
+                () -> {
+                    //根据商品标题、品牌、分类进行搜索
+                    List<FunctionScoreQueryBuilder.FilterFunctionBuilder> filterFunctionBuilders = new ArrayList<>();
+                    filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("name", keyword),
+                            ScoreFunctionBuilders.weightFactorFunction(8)));
+                    filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("subTitle", keyword),
+                            ScoreFunctionBuilders.weightFactorFunction(2)));
+                    filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("keywords", keyword),
+                            ScoreFunctionBuilders.weightFactorFunction(2)));
+                    filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("brandId", brandId),
+                            ScoreFunctionBuilders.weightFactorFunction(5)));
+                    filterFunctionBuilders.add(new FunctionScoreQueryBuilder.FilterFunctionBuilder(QueryBuilders.matchQuery("productCategoryId", productCategoryId),
+                            ScoreFunctionBuilders.weightFactorFunction(3)));
+                    FunctionScoreQueryBuilder.FilterFunctionBuilder[] builders = new FunctionScoreQueryBuilder.FilterFunctionBuilder[filterFunctionBuilders.size()];
+                    filterFunctionBuilders.toArray(builders);
+                    FunctionScoreQueryBuilder functionScoreQueryBuilder = QueryBuilders.functionScoreQuery(builders)
+                            .scoreMode(FunctionScoreQuery.ScoreMode.SUM)
+                            .setMinScore(2);
+                    //用于过滤掉相同的商品
+                    BoolQueryBuilder boolQueryBuilder = new BoolQueryBuilder();
+                    boolQueryBuilder.mustNot(QueryBuilders.termQuery("id",id));
+                    //构建查询条件
+                    NativeSearchQueryBuilder builder = new NativeSearchQueryBuilder();
+                    builder.withQuery(functionScoreQueryBuilder);
+                    builder.withFilter(boolQueryBuilder);
+                    builder.withPageable(pageable);
+                    NativeSearchQuery searchQuery = builder.build();
+                    LOGGER.info("DSL:{}", searchQuery.getQuery().toString());
+                    SearchHits<EsProduct> searchHits = elasticsearchRestTemplate.search(searchQuery, EsProduct.class);
+                    if(searchHits.getTotalHits()<=0){
+                        return new PageImpl<>(ListUtil.empty(),pageable,0);
+                    }
+                    List<EsProduct> searchProductList = searchHits.stream().map(SearchHit::getContent).collect(Collectors.toList());
+                    return new PageImpl<>(searchProductList,pageable,searchHits.getTotalHits());
+                },
+                () -> {
+                    // 降级策略：从数据库查询同品牌或同分类的商品
+                    LOGGER.warn("Elasticsearch 不可用，降级到数据库查询推荐商品");
+                    List<EsProduct> productList = productDao.searchProducts(null, brandId, productCategoryId);
+                    // 过滤掉当前商品
+                    productList = productList.stream()
+                            .filter(p -> !p.getId().equals(id))
+                            .collect(Collectors.toList());
+                    if (CollectionUtils.isEmpty(productList)) {
+                        return new PageImpl<>(ListUtil.empty(), pageable, 0);
+                    }
+                    int start = (int) pageable.getOffset();
+                    int end = Math.min((start + pageable.getPageSize()), productList.size());
+                    List<EsProduct> pagedList = start < productList.size() ? productList.subList(start, end) : ListUtil.empty();
+                    return new PageImpl<>(pagedList, pageable, productList.size());
+                }
+            );
         }
         return new PageImpl<>(ListUtil.empty());
     }
 
     @Override
     public EsProductRelatedInfo searchRelatedInfo(String keyword) {
-        NativeSearchQueryBuilder builder = new NativeSearchQueryBuilder();
-        //搜索条件
-        if(StrUtil.isEmpty(keyword)){
-            builder.withQuery(QueryBuilders.matchAllQuery());
-        }else{
-            builder.withQuery(QueryBuilders.multiMatchQuery(keyword,"name","subTitle","keywords"));
-        }
-        //聚合搜索品牌名称
-        builder.withAggregations(AggregationBuilders.terms("brandNames").field("brandName"));
-        //聚合搜索分类名称
-        builder.withAggregations(AggregationBuilders.terms("productCategoryNames").field("productCategoryName"));
-        //聚合搜索商品属性，去除type=0的属性
-        AbstractAggregationBuilder aggregationBuilder = AggregationBuilders.nested("allAttrValues","attrValueList")
-                .subAggregation(AggregationBuilders.filter("productAttrs",QueryBuilders.termQuery("attrValueList.type",1))
-                        .subAggregation(AggregationBuilders.terms("attrIds")
-                                .field("attrValueList.productAttributeId")
-                                .subAggregation(AggregationBuilders.terms("attrValues")
-                                        .field("attrValueList.value"))
-                                .subAggregation(AggregationBuilders.terms("attrNames")
-                                        .field("attrValueList.name"))));
-        builder.withAggregations(aggregationBuilder);
-        NativeSearchQuery searchQuery = builder.build();
-        SearchHits<EsProduct> searchHits = elasticsearchRestTemplate.search(searchQuery, EsProduct.class);
-        return convertProductRelatedInfo(searchHits);
+        CircuitBreaker circuitBreaker = circuitBreakerConfig.elasticsearchCircuitBreaker();
+        
+        return CircuitBreakerUtil.execute(
+            circuitBreaker,
+            () -> {
+                NativeSearchQueryBuilder builder = new NativeSearchQueryBuilder();
+                //搜索条件
+                if(StrUtil.isEmpty(keyword)){
+                    builder.withQuery(QueryBuilders.matchAllQuery());
+                }else{
+                    builder.withQuery(QueryBuilders.multiMatchQuery(keyword,"name","subTitle","keywords"));
+                }
+                //聚合搜索品牌名称
+                builder.withAggregations(AggregationBuilders.terms("brandNames").field("brandName"));
+                //聚合搜索分类名称
+                builder.withAggregations(AggregationBuilders.terms("productCategoryNames").field("productCategoryName"));
+                //聚合搜索商品属性，去除type=0的属性
+                AbstractAggregationBuilder aggregationBuilder = AggregationBuilders.nested("allAttrValues","attrValueList")
+                        .subAggregation(AggregationBuilders.filter("productAttrs",QueryBuilders.termQuery("attrValueList.type",1))
+                                .subAggregation(AggregationBuilders.terms("attrIds")
+                                        .field("attrValueList.productAttributeId")
+                                        .subAggregation(AggregationBuilders.terms("attrValues")
+                                                .field("attrValueList.value"))
+                                        .subAggregation(AggregationBuilders.terms("attrNames")
+                                                .field("attrValueList.name"))));
+                builder.withAggregations(aggregationBuilder);
+                NativeSearchQuery searchQuery = builder.build();
+                SearchHits<EsProduct> searchHits = elasticsearchRestTemplate.search(searchQuery, EsProduct.class);
+                return convertProductRelatedInfo(searchHits);
+            },
+            () -> {
+                // 降级策略：返回空的相关信息
+                LOGGER.warn("Elasticsearch 不可用，返回空的商品相关信息");
+                EsProductRelatedInfo info = new EsProductRelatedInfo();
+                info.setBrandNames(new ArrayList<>());
+                info.setProductCategoryNames(new ArrayList<>());
+                info.setProductAttrs(new ArrayList<>());
+                return info;
+            }
+        );
     }
 
     /**
